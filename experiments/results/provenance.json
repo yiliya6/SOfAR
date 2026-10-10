@@ -1,0 +1,17 @@
+{
+  "track_base_commit": "38597e3",
+  "algorithm_commit": "d10ab62500c4bfd2bc6cdb80e39cc21689eafdc8",
+  "csv_sha256": {
+    "racelines/raceline_IMS.csv": "0e43b338b2297da1f41818165547e480901432805c083964854681287add74d6",
+    "racelines/raceline_KS.csv": "4114267224e8e30f43cee6c34a6bd73e16966974ab17dcb751cdc51d228199b3",
+    "racelines/raceline_LS.csv": "7ac3e78b7d24b4a6560e45fd3806224730267a10e017ae647610457eec484c51",
+    "racelines/raceline_Monza.csv": "382730ab9325ccca74811700cea339263b006b23f56b4188c289a7f3e4b124cb",
+    "boundaries/boundaries_IMS.csv": "de608dd2754b0fd540af0a54b9b84eff8dac10dec653c3ff87d5537bd99e1be2",
+    "boundaries/boundaries_KS.csv": "24b91b3447aa9c19036be995c1ac8666d8bceb96331c4d37611e4f377c2407f3",
+    "boundaries/boundaries_LS.csv": "80c144963050484127d2503bdcbed5eb07b44db3b66f5dbba47a46a4b6486837",
+    "boundaries/boundaries_Monza.csv": "8a9359ceebc98d821d70014d11c5383ce1283ea4fc170d75a932f09213d95cba"
+  },
+  "platform": "Linux-6.8.0-1061-aws-x86_64-with-glibc2.35",
+  "cpu": "INTEL(R) XEON(R) PLATINUM 8559C",
+  "timing_context": "Sequential single-machine episodes; no latency injected into dynamics; audit/plotting/CI/setup may add system load. No dedicated real-time benchmark."
+}

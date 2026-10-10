@@ -94,8 +94,8 @@ def forecast_obstacles(obs, line, length, count):
         for k in range(count):
             future[k + 1, j] = future[k, j]
             speed = pace * geometry(future[k, j, 0], line, length)[5]
-            future[k + 1, j, 2] = speed
             future[k + 1, j, 0] += DT * speed
+            future[k + 1, j, 2] = pace * geometry(future[k + 1, j, 0], line, length)[5]
     return future
 
 
@@ -167,6 +167,7 @@ class SideDecision:
     target: float = 0.0
     solve_ms: float = 0.0
     feasible: bool = True
+    obstacle_idx: int = -1
 
 
 def miqp_side(track: Track, state: np.ndarray, obstacles: np.ndarray, previous: SideDecision) -> SideDecision:
@@ -174,10 +175,10 @@ def miqp_side(track: Track, state: np.ndarray, obstacles: np.ndarray, previous: 
     plan_dt, n_steps = 0.25, 18
     cur = float(state[0])
     active = []
-    for obs in obstacles:
+    for idx, obs in enumerate(obstacles):
         ahead = (obs[0] - cur + track.length / 2) % track.length - track.length / 2
         if -12 < ahead < 180:
-            active.append((ahead, obs))
+            active.append((ahead, obs, idx))
     if not active:
         return SideDecision(solve_ms=(perf_counter() - start) * 1000)
 
@@ -189,6 +190,7 @@ def miqp_side(track: Track, state: np.ndarray, obstacles: np.ndarray, previous: 
     d = model.addVars(n_steps, lb=-20.0, ub=20.0)
     binaries = model.addVars(len(active), vtype=gp.GRB.BINARY)
     slacks = []
+    first_crossing: dict[int, int] = {}
     model.addConstr(d[0] >= state[1] - 0.6)
     model.addConstr(d[0] <= state[1] + 0.6)
     for k in range(n_steps):
@@ -199,9 +201,10 @@ def miqp_side(track: Track, state: np.ndarray, obstacles: np.ndarray, previous: 
         if k:
             model.addConstr(d[k] - d[k - 1] <= 0.85)
             model.addConstr(d[k - 1] - d[k] <= 0.85)
-        for j, (ahead, obs) in enumerate(active):
+        for j, (ahead, obs, _) in enumerate(active):
             predicted = ahead + obs[2] * (k + 1) * plan_dt
             if abs((k + 1) * plan_dt * state[3] - predicted) < 5.5:
+                first_crossing.setdefault(j, k)
                 slack = model.addVar(lb=0.0)
                 slacks.append(slack)
                 model.addConstr(d[k] <= obs[1] - 2.8 + 50 * binaries[j] + slack)
@@ -212,21 +215,20 @@ def miqp_side(track: Track, state: np.ndarray, obstacles: np.ndarray, previous: 
     objective += gp.quicksum(180 * (d[k] - d[k - 1]) * (d[k] - d[k - 1])
                              for k in range(1, n_steps))
     objective += gp.quicksum(50000 * s for s in slacks)
-    if previous.side:
-        nearest = min(range(len(active)), key=lambda j: active[j][0])
-        objective += 300 * (binaries[nearest] - (1 if previous.side == 1 else 0)) ** 2
+    j = min(first_crossing, key=lambda idx: first_crossing[idx])
+    if previous.side and previous.obstacle_idx == active[j][2]:
+        objective += 300 * (binaries[j] - (1 if previous.side == 1 else 0)) ** 2
     model.setObjective(objective, gp.GRB.MINIMIZE)
     model.optimize()
     elapsed = (perf_counter() - start) * 1000
     if model.SolCount == 0:
         return SideDecision(solve_ms=elapsed, feasible=False)
-    j = min(range(len(active)), key=lambda j: max(active[j][0], 0))
     side = 1 if binaries[j].X > 0.5 else -1
     target = np.clip(active[j][1][1] + side * 3.6, track.at(cur)[6] + 1.4,
                      track.at(cur)[7] - 1.4)
     if any(slack.X > 0.3 for slack in slacks):
         return SideDecision(solve_ms=elapsed, feasible=False)
-    return SideDecision(side, float(target), elapsed)
+    return SideDecision(side, float(target), elapsed, obstacle_idx=active[j][2])
 
 
 def guide(z: np.ndarray, obstacles: np.ndarray, decision: SideDecision,

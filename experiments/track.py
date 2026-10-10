@@ -87,8 +87,8 @@ class Track:
 
     def advance_obstacles(self, obstacles: np.ndarray, pace: float, dt: float) -> None:
         for obs in obstacles:
+            obs[0] += pace * self.at(obs[0])[5] * dt
             obs[2] = pace * self.at(obs[0])[5]
-            obs[0] += obs[2] * dt
 
     def front_distance(self, ego_arc: float, obs_arc: float) -> float:
         return (obs_arc - ego_arc) % self.length
@@ -102,7 +102,9 @@ class Track:
         while any(j != idx and abs((o[0] - candidate + self.length / 2) % self.length - self.length / 2) < 18
                   for j, o in enumerate(obstacles)):
             candidate += 25
+        pace = float(obstacles[idx, 2]) / max(float(self.at(float(obstacles[idx, 0]))[5]), 0.1)
         obstacles[idx, 0] = candidate
+        obstacles[idx, 2] = pace * self.at(candidate)[5]
         obstacles[idx, 3] = 0.0
 
 

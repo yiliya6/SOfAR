@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,13 +12,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from experiments.track import Track
+from experiments.track import Track, collision
+from experiments.run import DT, dataset_hashes
 
 COLORS = {"B0": "#0072B2", "B1": "#D55E00", "B2": "#009E73"}
 
 
 def report(source: Path, output: Path):
     manifest = json.loads((source / "manifest.json").read_text())
+    root = Path(__file__).parent
+    digest = hashlib.sha256(b"".join((root / p).read_bytes() for p in ("controller.py", "track.py", "run.py"))).hexdigest()
+    if manifest["source_sha256"] != digest or manifest.get("dataset_sha256") != dataset_hashes(manifest["tracks"]):
+        raise ValueError("Audit requires the same frozen source and track data as the experiment")
     with (source / "episodes.csv").open() as f:
         rows = list(csv.DictReader(f))
     expected = {(t, float(p), int(s), m) for t in manifest["tracks"]
@@ -27,14 +33,21 @@ def report(source: Path, output: Path):
         raise ValueError("Incomplete or duplicate experiment matrix; cannot issue a final report")
     output.mkdir(parents=True, exist_ok=True)
     timing: dict[str, list[np.ndarray]] = {m: [] for m in manifest["methods"]}
+    end_contacts: dict[str, int] = {m: 0 for m in manifest["methods"]}
     for row in rows:
-        if row["success"] == "True" and float(row["sim_s"]) != manifest["max_time"]:
+        if row["success"] == "True" and not np.isclose(float(row["sim_s"]), manifest["max_time"], rtol=0, atol=1e-9):
             raise ValueError("A successful episode did not complete its duration")
         path = source / f"trajectory_{row['track']}_{float(row['pace']):g}_{row['seed']}_{row['method']}.npz"
         data = np.load(path)
         if len(data["cycle_ms"]) != int(row["cycles"]):
             raise ValueError("Latency records do not match actual executed cycles")
+        if data["samples"].shape != (int(row["cycles"]), 19) or not np.allclose(data["samples"][:, 0], np.arange(1, int(row["cycles"]) + 1) * DT):
+            raise ValueError("Trajectory rows do not match actual executed cycles")
         timing[row["method"]].append(data["cycle_ms"])
+        end = data["samples"][-1]
+        track = Track.load(row["track"])
+        end_contacts[row["method"]] += int(any(collision(track, end[1:8], np.array([end[11+j], end[15+j], 0.0, 0.0]))
+                                               for j in range(4)))
     totals: list[dict] = []
     for method in manifest["methods"]:
         selected = [r for r in rows if r["method"] == method]
@@ -45,6 +58,7 @@ def report(source: Path, output: Path):
                            completions=sum(r["success"] == "True" for r in selected),
                            collisions=sum(r["failure"] == "collision" for r in selected),
                            boundary_failures=sum(r["failure"] == "track_boundary_violation" for r in selected),
+                           physical_end_contacts=end_contacts[method],
                            mean_survival_s=float(np.mean([float(r["sim_s"]) for r in selected])),
                            total_laps=sum(float(r["laps"]) for r in selected),
                            overtakes=sum(int(r["overtakes"]) for r in selected),
@@ -57,16 +71,27 @@ def report(source: Path, output: Path):
                            repair_per_attempt_ms=repair_ms / repairs if repairs else 0.0,
                            fallbacks=sum(int(r["fallbacks"]) for r in selected),
                            unrecoverable=sum(int(r["unrecoverable"]) for r in selected)))
+    paired = []
+    for left, right in (("B1", "B0"), ("B1", "B2")):
+        if left not in manifest["methods"] or right not in manifest["methods"]:
+            continue
+        by_method = {m: {(r["track"], r["pace"], r["seed"]): r["success"] == "True" for r in rows if r["method"] == m}
+                     for m in (left, right)}
+        a, b = by_method[left], by_method[right]
+        paired.append(dict(comparison=f"{left} vs {right}", left_only=sum(a[k] and not b[k] for k in a),
+                           right_only=sum(b[k] and not a[k] for k in a),
+                           both=sum(a[k] and b[k] for k in a), neither=sum(not a[k] and not b[k] for k in a)))
+    (output / "paired.json").write_text(json.dumps(paired, indent=2))
     (output / "totals.json").write_text(json.dumps(totals, indent=2))
     with (output / "totals.csv").open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(totals[0]))
+        writer = csv.DictWriter(f, fieldnames=list(totals[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(totals)
     tracks = manifest["tracks"]
     fig, axes = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
     for idx, method in enumerate(manifest["methods"]):
         for ax, metric, label in zip(axes, ["success", "sim_s", "overtakes"],
-                                     ["200 s completion rate", "Mean survival [s]", "Mean overtakes / episode"]):
+                                     [f"{manifest['max_time']:g} s completion rate", "Mean survival [s]", "Mean overtakes / episode"]):
             values = []
             for track in tracks:
                 selected = [r for r in rows if r["track"] == track and r["method"] == method]
@@ -127,17 +152,22 @@ def report(source: Path, output: Path):
             "这不是作者 acados-MPC / RL 的复现。动力学未标定，速度参考有额外的 39 m/s 上限及提前制动，对手 pace 是原始 raceline 速度倍率。",
             "计时包含控制器规划、采样、筛选与 shield，不包含仿真真值检测/绘图；JIT 已排除。计算延迟没有写回动力学；不是硬实时或严格 CBF 安全证明。",
             "", "## 汇总（所有失败均保留）", "",
-            "|方法|200 s 完成|碰撞|越界|平均存活 s|总圈数|超车|控制均值 ms|P95 ms|P99 ms|QP 修复均摊 ms|",
+            f"|方法|{manifest['max_time']:g} s 完成|碰撞|越界|平均存活 s|总圈数|超车|控制均值 ms|P95 ms|P99 ms|QP 修复均摊 ms|",
             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for r in totals:
         text.append(f"|{r['method']}|{r['completions']}/{r['n']}|{r['collisions']}|{r['boundary_failures']}|"
                     f"{r['mean_survival_s']:.1f}|{r['total_laps']:.2f}|{r['overtakes']}|{r['cycle_mean_ms']:.2f}|"
                     f"{r['cycle_p95_ms']:.2f}|{r['cycle_p99_ms']:.2f}|{r['repair_amortized_ms']:.3f}|")
     text += ["", "延迟来自全部实际周期 pooled 数据，不是 episode P95 的平均。失败方法执行的周期较少、轨迹与状态不同，不能把两组耗时差直接归因为 shield 成本。",
+             "碰撞/越界列为首要终止原因（同时违反时越界优先）。对最终车体独立 SAT 复核的物理接触次数：" +
+             "；".join(f"{r['method']} {r['physical_end_contacts']} 次" for r in totals) + "。",
              "", "## Shield 与保底状态", "",
              "|方法|修复尝试|修复通过|回退|不可恢复周期|超过 100 ms 周期|", "|---|---:|---:|---:|---:|---:|"]
     for r in totals:
         text.append(f"|{r['method']}|{r['repairs']}|{r['repair_successes']}|{r['fallbacks']}|{r['unrecoverable']}|{r['deadline_overruns']} / {r['cycles']}|")
+    text += ["", "## 同初始状态配对完成计数", "", "|比较|仅左组完成|仅右组完成|均完成|均失败|", "|---|---:|---:|---:|---:|"]
+    for pair in paired:
+        text.append(f"|{pair['comparison']}|{pair['left_only']}|{pair['right_only']}|{pair['both']}|{pair['neither']}|")
     text += ["", "QP 均摊时间只计事件触发局部修复，未单独测量 rollout 屏障代价开销。`unrecoverable` 表示没找到预测可接受的序列，不等于当步已经碰撞。",
              "", "## 解释边界", "",
              "- B0/B1 比较偏置候选方案，包含 APF 与原子候选的共同作用，不能归因于单独一个 APF 分量。",
@@ -146,8 +176,9 @@ def report(source: Path, output: Path):
              "- 三组同 seed、同对手策略；回收时间随自车进度变化，因此回收后不保证同一绝对对手轨迹。",
              "- 完成率不能单独代表赛车速度；应与所有 episode 的圈数、超车和存活时间一起阅读。",
              "- 开发试跑及调参失败保留在独立目录，不计入冻结源码的正式样本。",
+             "- 真值几何在 0.1 s 执行采样点判断，不是连续时间扫掠碰撞证明。",
              "", "## 图", "", "![赛道对照](comparison.png)", "", "![逐周期计时](latency.png)", "", "![预先固定选例](trajectory.png)",
-             "", "复现：参见 `experiments/README.md`，逐次原始 CSV 与配置 manifest 一并交付。"]
+             "", "复现：参见 `experiments/README.md`，逐次原始 CSV 与配置 manifest 一并交付。数据源是本地产生的 CSV/NPZ，不需要数据库；可复现聚合脚本为 `experiments/report.py`，不是 SQL 查询。"]
     (output / "REPORT.md").write_text("\n".join(text) + "\n")
     print(json.dumps(totals, indent=2))
 

@@ -13,9 +13,9 @@ python -m venv .venv-mppi
 .venv-mppi/bin/python -m pytest -q experiments
 .venv-mppi/bin/python -m ruff check experiments
 .venv-mppi/bin/python -m mypy experiments --follow-imports skip --ignore-missing-imports
-.venv-mppi/bin/python -m experiments.run --suite development --output batch_results/development_v1 --trajectories
-.venv-mppi/bin/python -m experiments.run --suite final --output batch_results/final_v1 --trajectories
-.venv-mppi/bin/python -m experiments.report --input batch_results/final_v1 --output batch_results/report
+.venv-mppi/bin/python -m experiments.run --suite development --output batch_results/development_v2 --trajectories
+.venv-mppi/bin/python -m experiments.run --suite final --output batch_results/final_v2 --trajectories
+.venv-mppi/bin/python -m experiments.report --input batch_results/final_v2 --output batch_results/report
 ```
 
 development 为 LS × {0.3,0.65} × seeds 101–105 × 三方法 = 30 次；final 为 {KS,IMS,LS,Monza} × {0.1,0.3,0.5,0.65,0.8} × seeds 201–205 × 三方法 = 300 次。每次最多 200 s，碰撞、车体跨边界或非有限状态即失败，失败不得删去。目录存在时可断点继续；配置、源码哈希或依赖版本不一致时拒绝混入新结果。
@@ -48,5 +48,9 @@ development 为 LS × {0.3,0.65} × seeds 101–105 × 三方法 = 30 次；fina
 - `summary.json`：快速按赛道/方法汇总；其中 `mean_cycle_ms` 是 episode 均值的平均。报告会另从逐周期记录计算 pooled 均值和分位数，避免混淆两者。
 
 计算时间只包含控制器（规划、采样、筛选、shield），不包含绘图、真值碰撞判定、操作系统硬实时调度。JIT 编译排除在计时之外。计算延迟未写回植物动力学；100 ms 超时只是记录，不是延迟注入实验。`repair_total_ms` 仅量化事件触发 QP 修复，不单独隔离 batch 内屏障代价的额外耗时。短前缀 DCBF 是工程过滤而非高相对阶 CBF/HOCBF 不变性证明。
+
+CSV 的 `failure` 是首要终止原因：同时越界和碰撞时，runner 先记越界。报告另外对保存的最终世界坐标车体独立复核碰撞，避免把“零碰撞终止”误当成“完全没有物理接触”。
+
+断点恢复同时校验源码、依赖和赛道文件哈希（包括对手初始化/回收使用的 LS 数据）；请求轨迹时会重跑丢失或损坏 NPZ 的 episode，并原子替换对应 CSV 行。自定义时长必须为至少 0.1 s 的整数控制步。报告须在原冻结源码/赛道版本下生成。`development_v1` 和中止的 `final_v1` 含已确认的预测/目标选择错误，只作为历史调试记录，不作为有效方法结论。
 
 本实现的开发试跑可能失败；正式结果必须完整保留，不能以单次成功、计算均值或原版论文结果替代本实现实际统计。

@@ -12,6 +12,7 @@ import os
 from importlib.metadata import version
 from datetime import datetime, timezone
 from pathlib import Path
+from zipfile import BadZipFile
 
 import numpy as np
 
@@ -25,6 +26,30 @@ FIELDS = ["track", "pace", "seed", "method", "sim_s", "success", "failure",
           "deadline_overruns", "numba_warmup_excluded"]
 
 
+def duration_steps(max_time: float) -> int:
+    if not np.isfinite(max_time) or max_time < DT:
+        raise ValueError(f"max-time must be at least {DT}s and an integer multiple of it")
+    steps = round(max_time / DT)
+    if not np.isclose(steps * DT, max_time, rtol=0, atol=1e-9):
+        raise ValueError(f"max-time must be an integer multiple of {DT}s")
+    return steps
+
+
+def dataset_hashes(tracks: list[str], root: Path | None = None) -> dict[str, str]:
+    root = root or Path(__file__).resolve().parents[1]
+    paths = [f"{folder}/{prefix}_{name}.csv" for name in sorted(set(tracks) | {"LS"})
+             for folder, prefix in (("racelines", "raceline"), ("boundaries", "boundaries"))]
+    return {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in paths}
+
+
+def trajectory_complete(path: Path, cycles: int) -> bool:
+    try:
+        with np.load(path) as data:
+            return data["samples"].shape == (cycles, 19) and len(data["cycle_ms"]) == cycles
+    except (OSError, ValueError, KeyError, EOFError, BadZipFile):
+        return False
+
+
 def initial_state(track: Track, seed: int) -> np.ndarray:
     # Deterministic randomized, paired ego starts near the author's LS index 20.
     rng = np.random.default_rng(seed)
@@ -36,6 +61,7 @@ def initial_state(track: Track, seed: int) -> np.ndarray:
 
 def run_episode(track: Track, pace: float, seed: int, method: str, max_time: float,
                 trajectory_path: Path | None = None) -> dict:
+    steps = duration_steps(max_time)
     ego = initial_state(track, seed)
     obstacles = track.initial_obstacles(pace, float(ego[0]))
     if off_track(track, ego) or any(collision(track, ego, obs) for obs in obstacles):
@@ -46,7 +72,6 @@ def run_episode(track: Track, pace: float, seed: int, method: str, max_time: flo
     failure = ""
     start_arc = float(ego[0])
     unrecoverable = 0
-    steps = round(max_time / DT)
     for i in range(steps):
         action, ms, high_ms, safe = controller.control(ego, obstacles)
         cycle_ms.append(ms)
@@ -131,13 +156,19 @@ def main():
     tracks, pace_levels, seeds = args.tracks or tracks, args.pace or pace_levels, args.seeds or seeds
     if not tracks or not pace_levels or not seeds or args.max_time <= 0:
         parser.error("A valid track, pace, seeds, and positive max-time are required")
-    if any(p < 0 or p > 1 for p in pace_levels):
+    try:
+        duration_steps(args.max_time)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if any(not np.isfinite(p) or p < 0 or p > 1 for p in pace_levels):
         parser.error("Pace is a factor of the published raceline velocity, between 0 and 1")
     methods = args.methods or ["B0", "B1", "B2"]
     args.output.mkdir(parents=True, exist_ok=True)
     results_file = args.output / "episodes.csv"
     current = list(csv.DictReader(results_file.open())) if results_file.exists() else []
     keys = {(r["track"], float(r["pace"]), int(r["seed"]), r["method"]) for r in current}
+    if len(keys) != len(current):
+        raise ValueError("Duplicate existing episode keys")
     # Warm the JIT outside timed episodes; no first-cycle compilation in latency metrics.
     warm = Track.load(tracks[0])
     z = initial_state(warm, seeds[0])
@@ -151,7 +182,8 @@ def main():
                     model="uncalibrated_dynamic_bicycle; not author's acados MPC",
                     obstacle_initialization="author LS indices as relative arc offsets; 4 cars",
                     completion=f"{args.max_time:g}s without collision or track-boundary crossing",
-                    source_sha256=digest, python=platform.python_version(), cpu_count=os.cpu_count(),
+                    source_sha256=digest, dataset_sha256=dataset_hashes(tracks),
+                    python=platform.python_version(), cpu_count=os.cpu_count(),
                     dependencies={p: version(p) for p in ("numpy", "scipy", "numba", "gurobipy", "osqp", "matplotlib")},
                     ego_speed_reference="min(0.8 raceline,39m/s,sqrt(16/abs(curvature))); 7m/s² backward braking envelope",
                     repair_timing="QP repair only; does not isolate batch barrier-cost overhead",
@@ -159,11 +191,13 @@ def main():
                     latency="CPU perf_counter includes planning/selection/shield; excludes JIT compilation")
     manifest_path = args.output / "manifest.json"
     if not manifest_path.exists():
+        if current:
+            raise ValueError("Cannot resume episode rows without their original manifest")
         manifest_path.write_text(json.dumps(manifest, indent=2))
     else:
         old = json.loads(manifest_path.read_text())
-        for key in ("suite", "tracks", "pace", "seeds", "methods", "max_time", "source_sha256", "dependencies"):
-            if old[key] != manifest[key]:
+        for key in ("suite", "tracks", "pace", "seeds", "methods", "max_time", "source_sha256", "dataset_sha256", "dependencies"):
+            if old.get(key) != manifest[key]:
                 raise ValueError(f"Resume manifest disagrees on {key}")
     total = len(tracks) * len(pace_levels) * len(seeds) * len(methods)
     for name in tracks:
@@ -172,16 +206,20 @@ def main():
             for seed in seeds:
                 for method in methods:
                     key = (name, pace, seed, method)
-                    if key in keys:
-                        continue
                     trajectory = args.output / f"trajectory_{name}_{pace:g}_{seed}_{method}.npz" if args.trajectories else None
+                    if key in keys:
+                        old_row = next(r for r in current if (r["track"], float(r["pace"]), int(r["seed"]), r["method"]) == key)
+                        if trajectory is None or trajectory_complete(trajectory, int(old_row["cycles"])):
+                            continue
                     row = run_episode(track, pace, seed, method, args.max_time, trajectory)
-                    with results_file.open("a", newline="") as f:
-                        writer = csv.DictWriter(f, fieldnames=FIELDS)
-                        if f.tell() == 0:
-                            writer.writeheader()
-                        writer.writerow(row)
+                    current = [r for r in current if (r["track"], float(r["pace"]), int(r["seed"]), r["method"]) != key]
                     current.append(row)
+                    temporary = results_file.with_suffix(".csv.tmp")
+                    with temporary.open("w", newline="") as f:
+                        writer = csv.DictWriter(f, fieldnames=FIELDS, lineterminator="\n")
+                        writer.writeheader()
+                        writer.writerows(current)
+                    temporary.replace(results_file)
                     keys.add(key)
                     (args.output / "summary.json").write_text(json.dumps(summarize(current), indent=2))
                     print(f"{len(current)}/{total}: {key} success={row['success']} "
