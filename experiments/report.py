@@ -156,6 +156,7 @@ def report(source: Path, output: Path):
     text = ["# SOfAR 风格闭环实验：实际运行结果", "", "## 范围与计时边界", "",
             f"实际完成 {len(rows)} 次；每次上限 {manifest['max_time']} s。源码 SHA-256：`{manifest['source_sha256']}`。",
             "这不是作者 acados-MPC / RL 的复现。动力学未标定，速度参考有额外的 39 m/s 上限及提前制动，对手 pace 是原始 raceline 速度倍率。",
+            "高 pace 档的对手在部分赛道/路段可能快于自车目标速度上限，对这些档次不能预设必能超车；完成率也不等于超车性能。",
             "计时包含控制器规划、采样、筛选与 shield，不包含仿真真值检测/绘图；JIT 已排除。计算延迟没有写回动力学；不是硬实时或严格 CBF 安全证明。",
             "", "## 汇总（所有失败均保留）", "",
             f"|方法|{manifest['max_time']:g} s 完成|碰撞|越界|平均存活 s|总圈数|超车|控制均值 ms|P95 ms|P99 ms|QP 修复均摊 ms|",
@@ -164,6 +165,15 @@ def report(source: Path, output: Path):
         text.append(f"|{r['method']}|{r['completions']}/{r['n']}|{r['collisions']}|{r['boundary_failures']}|"
                     f"{r['mean_survival_s']:.1f}|{r['total_laps']:.2f}|{r['overtakes']}|{r['cycle_mean_ms']:.2f}|"
                     f"{r['cycle_p95_ms']:.2f}|{r['cycle_p99_ms']:.2f}|{r['repair_amortized_ms']:.3f}|")
+    text += ["", "## 分赛道（不以总体均值掩盖失败）", "",
+             "|赛道|方法|完成|碰撞终止|越界终止|平均存活 s|超车总数|", "|---|---|---:|---:|---:|---:|---:|"]
+    for name in tracks:
+        for method in manifest["methods"]:
+            group = [r for r in rows if r["track"] == name and r["method"] == method]
+            text.append(f"|{name}|{method}|{sum(r['success'] == 'True' for r in group)}/{len(group)}|" +
+                        f"{sum(r['failure'] == 'collision' for r in group)}|" +
+                        f"{sum(r['failure'] == 'track_boundary_violation' for r in group)}|" +
+                        f"{np.mean([float(r['sim_s']) for r in group]):.1f}|{sum(int(r['overtakes']) for r in group)}|")
     lookup = {r["method"]: r for r in totals}
     text += ["", "## 本次观察（不是成功预设）", ""]
     if "B1" in lookup and "B0" in lookup:
@@ -171,6 +181,11 @@ def report(source: Path, output: Path):
         better = full["completions"] / full["n"] > baseline["completions"] / baseline["n"]
         text.append(f"完整方法 B1 完成 {full['completions']}/{full['n']}，基线 B0 完成 {baseline['completions']}/{baseline['n']}；" +
                     ("本批总体完成率更高，但尚不能证明普遍收益。" if better else "未观察到整体安全完成率优于基线，不能宣称 APF 方案已经有效。"))
+    if "B1" in lookup and "B2" in lookup:
+        shielded, unshielded = lookup["B1"], lookup["B2"]
+        text.append(f"B1 / B2 完成数为 {shielded['completions']}/{shielded['n']} / {unshielded['completions']}/{unshielded['n']}，" +
+                    f"末态物理接触为 {shielded['physical_end_contacts']} / {unshielded['physical_end_contacts']} 次。" +
+                    "这是屏障代价加局部修复的组合比较；只有开销小不等于已验证安全收益，不能把原理预期当作本批结论。")
     text += ["动力学和跟踪未标定，失败终止原因、末态与不可恢复周期只能用于定位问题，不能据此断言单一失效原因。下一步优先验证无障碍跟踪和车辆参数，而不是继续增加方法组。"]
     text += ["", "延迟来自全部实际周期 pooled 数据，不是 episode P95 的平均。失败方法执行的周期较少、轨迹与状态不同，不能把两组耗时差直接归因为 shield 成本。",
              "碰撞/越界列为首要终止原因（同时违反时越界优先）。对最终车体独立 SAT 复核的物理接触次数：" +
