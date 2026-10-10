@@ -1,0 +1,16 @@
+[
+  {
+    "comparison": "B1 vs B0",
+    "left_only": 1,
+    "right_only": 3,
+    "both": 2,
+    "neither": 4
+  },
+  {
+    "comparison": "B1 vs B2",
+    "left_only": 3,
+    "right_only": 2,
+    "both": 0,
+    "neither": 5
+  }
+]

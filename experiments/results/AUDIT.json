@@ -1,0 +1,20 @@
+{
+  "development_v2": {
+    "episodes": 30,
+    "unique_expected_keys": 30,
+    "all_npz_valid": true,
+    "executed_cycles": 33186,
+    "all_successes_200s": true,
+    "source_and_dataset_hashes_match": true,
+    "failure_rows_retained": 20
+  },
+  "final_v2": {
+    "episodes": 300,
+    "unique_expected_keys": 300,
+    "all_npz_valid": true,
+    "executed_cycles": 359947,
+    "all_successes_200s": true,
+    "source_and_dataset_hashes_match": true,
+    "failure_rows_retained": 184
+  }
+}

@@ -1,5 +1,11 @@
 # MPC-CBF for Overtaking
 
+## Standalone MIQP / APF / MPPI experiments
+
+For the new headless three-method experiment on the four published tracks, see
+[experiments/README.md](experiments/README.md). It does not require acados and does
+not reproduce the original MPC/RL controller or claim a formal CBF guarantee.
+
 A Python-based simulator for Model Predictive Control (MPC) with Control Barrier Functions (CBF) for vehicle overtaking maneuvers, with Acados and optional RL (PASTA) tuning.
 
 ## Dependencies

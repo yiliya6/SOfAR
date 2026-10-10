@@ -1,0 +1,61 @@
+{
+  "suite": "final",
+  "tracks": [
+    "KS",
+    "IMS",
+    "LS",
+    "Monza"
+  ],
+  "pace": [
+    0.1,
+    0.3,
+    0.5,
+    0.65,
+    0.8
+  ],
+  "seeds": [
+    201,
+    202,
+    203,
+    204,
+    205
+  ],
+  "methods": [
+    "B0",
+    "B1",
+    "B2"
+  ],
+  "max_time": 200.0,
+  "plant_dt": 0.1,
+  "horizon": 20,
+  "candidates": 128,
+  "created_utc": "2026-10-10T08:09:01.265730+00:00",
+  "model": "uncalibrated_dynamic_bicycle; not author's acados MPC",
+  "obstacle_initialization": "author LS indices as relative arc offsets; 4 cars",
+  "completion": "200s without collision or track-boundary crossing",
+  "source_sha256": "e483c71a8931173974f00db8a731a28c9e23e712897b4979e831b4bd92423da4",
+  "dataset_sha256": {
+    "racelines/raceline_IMS.csv": "0e43b338b2297da1f41818165547e480901432805c083964854681287add74d6",
+    "boundaries/boundaries_IMS.csv": "de608dd2754b0fd540af0a54b9b84eff8dac10dec653c3ff87d5537bd99e1be2",
+    "racelines/raceline_KS.csv": "4114267224e8e30f43cee6c34a6bd73e16966974ab17dcb751cdc51d228199b3",
+    "boundaries/boundaries_KS.csv": "24b91b3447aa9c19036be995c1ac8666d8bceb96331c4d37611e4f377c2407f3",
+    "racelines/raceline_LS.csv": "7ac3e78b7d24b4a6560e45fd3806224730267a10e017ae647610457eec484c51",
+    "boundaries/boundaries_LS.csv": "80c144963050484127d2503bdcbed5eb07b44db3b66f5dbba47a46a4b6486837",
+    "racelines/raceline_Monza.csv": "382730ab9325ccca74811700cea339263b006b23f56b4188c289a7f3e4b124cb",
+    "boundaries/boundaries_Monza.csv": "8a9359ceebc98d821d70014d11c5383ce1283ea4fc170d75a932f09213d95cba"
+  },
+  "python": "3.10.12",
+  "cpu_count": 2,
+  "dependencies": {
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "numba": "0.61.2",
+    "gurobipy": "12.0.3",
+    "osqp": "1.0.4",
+    "matplotlib": "3.10.9"
+  },
+  "ego_speed_reference": "min(0.8 raceline,39m/s,sqrt(16/abs(curvature))); 7m/s\u00b2 backward braking envelope",
+  "repair_timing": "QP repair only; does not isolate batch barrier-cost overhead",
+  "safety": "engineering filter, not a proven CBF invariant; unrecoverable actions explicitly counted",
+  "latency": "CPU perf_counter includes planning/selection/shield; excludes JIT compilation"
+}

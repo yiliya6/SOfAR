@@ -1,0 +1,26 @@
+name: Closed-loop experiments
+
+on:
+  pull_request:
+    paths:
+      - 'experiments/**'
+      - '.github/workflows/closed-loop.yml'
+  push:
+    paths:
+      - 'experiments/**'
+      - '.github/workflows/closed-loop.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: experiments/requirements.txt
+      - run: python -m pip install -r experiments/requirements.txt
+      - run: python -m ruff check experiments
+      - run: python -m mypy experiments --follow-imports skip --ignore-missing-imports
+      - run: python -m pytest -q experiments
