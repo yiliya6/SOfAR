@@ -33,6 +33,7 @@ def report(source: Path, output: Path):
         raise ValueError("Incomplete or duplicate experiment matrix; cannot issue a final report")
     output.mkdir(parents=True, exist_ok=True)
     timing: dict[str, list[np.ndarray]] = {m: [] for m in manifest["methods"]}
+    miqp_timing: dict[str, list[np.ndarray]] = {m: [] for m in manifest["methods"]}
     end_contacts: dict[str, int] = {m: 0 for m in manifest["methods"]}
     for row in rows:
         if row["success"] == "True" and not np.isclose(float(row["sim_s"]), manifest["max_time"], rtol=0, atol=1e-9):
@@ -44,6 +45,7 @@ def report(source: Path, output: Path):
         if data["samples"].shape != (int(row["cycles"]), 19) or not np.allclose(data["samples"][:, 0], np.arange(1, int(row["cycles"]) + 1) * DT):
             raise ValueError("Trajectory rows do not match actual executed cycles")
         timing[row["method"]].append(data["cycle_ms"])
+        miqp_timing[row["method"]].append(data["miqp_ms"])
         end = data["samples"][-1]
         track = Track.load(row["track"])
         end_contacts[row["method"]] += int(any(collision(track, end[1:8], np.array([end[11+j], end[15+j], 0.0, 0.0]))
@@ -52,6 +54,7 @@ def report(source: Path, output: Path):
     for method in manifest["methods"]:
         selected = [r for r in rows if r["method"] == method]
         latencies = np.concatenate(timing[method])
+        high_latencies = np.concatenate(miqp_timing[method])
         repairs = sum(int(r["repair_attempts"]) for r in selected)
         repair_ms = sum(float(r["repair_total_ms"]) for r in selected)
         totals.append(dict(method=method, n=len(selected),
@@ -65,6 +68,9 @@ def report(source: Path, output: Path):
                            cycle_mean_ms=float(np.mean(latencies)),
                            cycle_p95_ms=float(np.percentile(latencies, 95)),
                            cycle_p99_ms=float(np.percentile(latencies, 99)),
+                           cycle_max_ms=float(np.max(latencies)),
+                           miqp_mean_ms=float(np.mean(high_latencies)),
+                           miqp_p95_ms=float(np.percentile(high_latencies, 95)),
                            cycles=len(latencies), deadline_overruns=int(np.sum(latencies > 100)),
                            repairs=repairs, repair_successes=sum(int(r["repair_successes"]) for r in selected),
                            repair_amortized_ms=repair_ms / len(latencies),
@@ -112,7 +118,7 @@ def report(source: Path, output: Path):
         axes[0].plot(data, np.linspace(0, 1, len(data)), color=COLORS[method], label=method)
     axes[0].set_xlabel("Controller compute latency [ms], JIT excluded")
     axes[0].set_ylabel("Empirical cumulative probability")
-    axes[0].set_xlim(0, max(r["cycle_p99_ms"] for r in totals) * 1.2)
+    axes[0].set_xlim(0, max(r["cycle_max_ms"] for r in totals) * 1.05)
     axes[0].legend()
     axes[1].bar([r["method"] for r in totals], [r["repair_amortized_ms"] for r in totals],
                 color=[COLORS[r["method"]] for r in totals])
@@ -158,6 +164,14 @@ def report(source: Path, output: Path):
         text.append(f"|{r['method']}|{r['completions']}/{r['n']}|{r['collisions']}|{r['boundary_failures']}|"
                     f"{r['mean_survival_s']:.1f}|{r['total_laps']:.2f}|{r['overtakes']}|{r['cycle_mean_ms']:.2f}|"
                     f"{r['cycle_p95_ms']:.2f}|{r['cycle_p99_ms']:.2f}|{r['repair_amortized_ms']:.3f}|")
+    lookup = {r["method"]: r for r in totals}
+    text += ["", "## 本次观察（不是成功预设）", ""]
+    if "B1" in lookup and "B0" in lookup:
+        full, baseline = lookup["B1"], lookup["B0"]
+        better = full["completions"] / full["n"] > baseline["completions"] / baseline["n"]
+        text.append(f"完整方法 B1 完成 {full['completions']}/{full['n']}，基线 B0 完成 {baseline['completions']}/{baseline['n']}；" +
+                    ("本批总体完成率更高，但尚不能证明普遍收益。" if better else "未观察到整体安全完成率优于基线，不能宣称 APF 方案已经有效。"))
+    text += ["动力学和跟踪未标定，失败终止原因、末态与不可恢复周期只能用于定位问题，不能据此断言单一失效原因。下一步优先验证无障碍跟踪和车辆参数，而不是继续增加方法组。"]
     text += ["", "延迟来自全部实际周期 pooled 数据，不是 episode P95 的平均。失败方法执行的周期较少、轨迹与状态不同，不能把两组耗时差直接归因为 shield 成本。",
              "碰撞/越界列为首要终止原因（同时违反时越界优先）。对最终车体独立 SAT 复核的物理接触次数：" +
              "；".join(f"{r['method']} {r['physical_end_contacts']} 次" for r in totals) + "。",
@@ -165,6 +179,9 @@ def report(source: Path, output: Path):
              "|方法|修复尝试|修复通过|回退|不可恢复周期|超过 100 ms 周期|", "|---|---:|---:|---:|---:|---:|"]
     for r in totals:
         text.append(f"|{r['method']}|{r['repairs']}|{r['repair_successes']}|{r['fallbacks']}|{r['unrecoverable']}|{r['deadline_overruns']} / {r['cycles']}|")
+    text += ["", "高层 MIQP 规划调用 pooled 均值 / P95（ms，含无活跃对手时的快速返回）：" +
+             "；".join(f"{r['method']} {r['miqp_mean_ms']:.2f} / {r['miqp_p95_ms']:.2f}" for r in totals) + "。",
+             "最大控制周期（ms）：" + "；".join(f"{r['method']} {r['cycle_max_ms']:.2f}" for r in totals) + "。"]
     text += ["", "## 同初始状态配对完成计数", "", "|比较|仅左组完成|仅右组完成|均完成|均失败|", "|---|---:|---:|---:|---:|"]
     for pair in paired:
         text.append(f"|{pair['comparison']}|{pair['left_only']}|{pair['right_only']}|{pair['both']}|{pair['neither']}|")
@@ -177,6 +194,7 @@ def report(source: Path, output: Path):
              "- 完成率不能单独代表赛车速度；应与所有 episode 的圈数、超车和存活时间一起阅读。",
              "- 开发试跑及调参失败保留在独立目录，不计入冻结源码的正式样本。",
              "- 真值几何在 0.1 s 执行采样点判断，不是连续时间扫掠碰撞证明。",
+             "- 固定种子与配置不等于跨硬件位级复现；Gurobi 墙钟时限可能影响边缘情形的可行解。",
              "", "## 图", "", "![赛道对照](comparison.png)", "", "![逐周期计时](latency.png)", "", "![预先固定选例](trajectory.png)",
              "", "复现：参见 `experiments/README.md`，逐次原始 CSV 与配置 manifest 一并交付。数据源是本地产生的 CSV/NPZ，不需要数据库；可复现聚合脚本为 `experiments/report.py`，不是 SQL 查询。"]
     (output / "REPORT.md").write_text("\n".join(text) + "\n")
