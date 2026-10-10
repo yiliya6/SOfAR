@@ -1,0 +1,49 @@
+{
+  "suite": "development",
+  "tracks": [
+    "LS"
+  ],
+  "pace": [
+    0.3,
+    0.65
+  ],
+  "seeds": [
+    101,
+    102,
+    103,
+    104,
+    105
+  ],
+  "methods": [
+    "B0",
+    "B1",
+    "B2"
+  ],
+  "max_time": 200.0,
+  "plant_dt": 0.1,
+  "horizon": 20,
+  "candidates": 128,
+  "created_utc": "2026-10-10T08:05:06.665044+00:00",
+  "model": "uncalibrated_dynamic_bicycle; not author's acados MPC",
+  "obstacle_initialization": "author LS indices as relative arc offsets; 4 cars",
+  "completion": "200s without collision or track-boundary crossing",
+  "source_sha256": "e483c71a8931173974f00db8a731a28c9e23e712897b4979e831b4bd92423da4",
+  "dataset_sha256": {
+    "racelines/raceline_LS.csv": "7ac3e78b7d24b4a6560e45fd3806224730267a10e017ae647610457eec484c51",
+    "boundaries/boundaries_LS.csv": "80c144963050484127d2503bdcbed5eb07b44db3b66f5dbba47a46a4b6486837"
+  },
+  "python": "3.10.12",
+  "cpu_count": 2,
+  "dependencies": {
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "numba": "0.61.2",
+    "gurobipy": "12.0.3",
+    "osqp": "1.0.4",
+    "matplotlib": "3.10.9"
+  },
+  "ego_speed_reference": "min(0.8 raceline,39m/s,sqrt(16/abs(curvature))); 7m/s\u00b2 backward braking envelope",
+  "repair_timing": "QP repair only; does not isolate batch barrier-cost overhead",
+  "safety": "engineering filter, not a proven CBF invariant; unrecoverable actions explicitly counted",
+  "latency": "CPU perf_counter includes planning/selection/shield; excludes JIT compilation"
+}

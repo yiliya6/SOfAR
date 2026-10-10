@@ -1,6 +1,5 @@
 {
   "track_base_commit": "38597e3",
-  "algorithm_commit": "d10ab62500c4bfd2bc6cdb80e39cc21689eafdc8",
   "csv_sha256": {
     "racelines/raceline_IMS.csv": "0e43b338b2297da1f41818165547e480901432805c083964854681287add74d6",
     "racelines/raceline_KS.csv": "4114267224e8e30f43cee6c34a6bd73e16966974ab17dcb751cdc51d228199b3",
@@ -13,5 +12,7 @@
   },
   "platform": "Linux-6.8.0-1061-aws-x86_64-with-glibc2.35",
   "cpu": "INTEL(R) XEON(R) PLATINUM 8559C",
-  "timing_context": "Sequential single-machine episodes; no latency injected into dynamics; audit/plotting/CI/setup may add system load. No dedicated real-time benchmark."
+  "timing_context": "Sequential single-machine episodes; no latency injected into dynamics; audit/plotting/CI/setup may add system load. No dedicated real-time benchmark.",
+  "pre_review_algorithm_commit": "d10ab62500c4bfd2bc6cdb80e39cc21689eafdc8",
+  "frozen_v2_algorithm_commit": "e08c497eee22d647ba23565cfafd8359d5c6a52d"
 }

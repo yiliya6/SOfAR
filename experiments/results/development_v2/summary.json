@@ -1,0 +1,41 @@
+[
+  {
+    "track": "LS",
+    "method": "B0",
+    "n": 10,
+    "success_rate": 0.5,
+    "simulation_seconds": 1277.1999999999998,
+    "laps": 5.958434388258396,
+    "overtakes": 8,
+    "mean_cycle_ms": 5.047495192311816,
+    "max_episode_p95_ms": 17.006770949888047,
+    "collisions": 0,
+    "boundary_violations": 5
+  },
+  {
+    "track": "LS",
+    "method": "B1",
+    "n": 10,
+    "success_rate": 0.3,
+    "simulation_seconds": 1092.3000000000002,
+    "laps": 5.635157346610907,
+    "overtakes": 19,
+    "mean_cycle_ms": 5.549622598727033,
+    "max_episode_p95_ms": 18.07878729982803,
+    "collisions": 0,
+    "boundary_violations": 7
+  },
+  {
+    "track": "LS",
+    "method": "B2",
+    "n": 10,
+    "success_rate": 0.2,
+    "simulation_seconds": 949.1,
+    "laps": 5.440156813924602,
+    "overtakes": 12,
+    "mean_cycle_ms": 5.332763877981975,
+    "max_episode_p95_ms": 15.517200049771407,
+    "collisions": 1,
+    "boundary_violations": 7
+  }
+]
